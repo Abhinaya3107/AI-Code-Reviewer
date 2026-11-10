@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import type { ReviewJob } from "../queue/reviewQueue.js";
+import type { ResolvedReviewJob } from "../queue/reviewQueue.js";
 import { commentKey } from "../utils/commentFormat.js";
 import { estimateCostUsd } from "../utils/cost.js";
 import type { ReviewOutcome } from "./reviewPipeline.js";
@@ -18,7 +18,7 @@ export interface BeganReview {
 }
 
 /** Records that a review is starting. Safe to call again on a retry: one row per (PR, commit). */
-export async function beginReview(db: PrismaClient, job: ReviewJob): Promise<BeganReview> {
+export async function beginReview(db: PrismaClient, job: ResolvedReviewJob): Promise<BeganReview> {
   const installation = await db.installation.upsert({
     where: { githubInstallationId: BigInt(job.installationId) },
     create: { githubInstallationId: BigInt(job.installationId), accountLogin: job.accountLogin },
@@ -53,8 +53,14 @@ export async function finishReview(
   began: Pick<BeganReview, "reviewId" | "installationDbId">,
   outcome: ReviewOutcome,
   durationMs: number,
+  /**
+   * Set for a manual "/review" re-run of the same commit: the run only posts NEW comments (earlier ones
+   * are skipped as repeats), so keep what is already stored and add to it instead of replacing it.
+   */
+  opts: { append?: boolean } = {},
 ): Promise<void> {
   const finishedAt = new Date();
+  const replace = opts.append ? {} : { deleteMany: {} };
 
   if (outcome.status === "skipped") {
     await db.review.update({
@@ -83,7 +89,7 @@ export async function finishReview(
       errorMessage: null, // a success after an earlier failed attempt clears the old error
       finishedAt,
       comments: {
-        deleteMany: {},
+        ...replace,
         create: (outcome.comments ?? []).map((c) => ({
           path: c.path,
           line: c.line,
@@ -95,7 +101,7 @@ export async function finishReview(
         })),
       },
       usageEvents: {
-        deleteMany: {},
+        ...replace,
         ...(inputTokens + outputTokens > 0
           ? {
               create: {

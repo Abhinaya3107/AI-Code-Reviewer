@@ -3,8 +3,9 @@ import pino from "pino";
 import { config } from "../config.js";
 import { db } from "../db/client.js";
 import { connection, REVIEW_QUEUE, type ReviewJob } from "../queue/reviewQueue.js";
-import { getInstallationOctokit } from "../services/github.js";
+import { getInstallationOctokit, reactToComment } from "../services/github.js";
 import { createLlm } from "../services/llm.js";
+import { resolveJob } from "../services/resolveJob.js";
 import { reviewPullRequest, type ReviewOutcome } from "../services/reviewPipeline.js";
 import { beginReview, failReview, finishReview } from "../services/reviewStore.js";
 
@@ -17,14 +18,19 @@ const worker = new Worker<ReviewJob>(
     const { installationId, repo, prNumber } = job.data;
     const [owner, name] = repo.split("/");
     const started = Date.now();
-    const began = db ? await beginReview(db, job.data) : null;
+
+    const octokit = await getInstallationOctokit(installationId);
+    const data = await resolveJob(octokit, job.data);
+    // Tell the person who typed "/review" that it was picked up.
+    if (data.commentId) await reactToComment(octokit, { owner, repo: name }, data.commentId, "eyes");
+
+    const began = db ? await beginReview(db, data) : null;
 
     let outcome: ReviewOutcome;
     try {
       if (began && !began.repositoryEnabled) {
         outcome = { status: "skipped", reason: "repository disabled" };
       } else {
-        const octokit = await getInstallationOctokit(installationId);
         outcome = await reviewPullRequest(octokit, llm, { owner, repo: name, prNumber }, log);
       }
     } catch (err) {
@@ -35,9 +41,9 @@ const worker = new Worker<ReviewJob>(
       throw err;
     }
 
-    if (db && began) await finishReview(db, began, outcome, Date.now() - started);
+    if (db && began) await finishReview(db, began, outcome, Date.now() - started, { append: data.trigger === "command" });
     const { comments: _omit, ...summary } = outcome; // keep log lines small
-    log.info({ repo, prNumber, stored: Boolean(db), ...summary }, "review finished");
+    log.info({ repo, prNumber, trigger: data.trigger, stored: Boolean(db), ...summary }, "review finished");
   },
   { connection, concurrency: 2 },
 );

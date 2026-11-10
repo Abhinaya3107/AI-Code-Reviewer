@@ -45,6 +45,8 @@ The webhook only verifies and enqueues, because GitHub expects a reply within 10
 
 - PostgreSQL + Prisma storage: installations, repositories, pull requests, reviews (status, risk, model, tokens, estimated cost, duration), comments, and monthly usage events. One review row per (PR, commit), so retries never duplicate. A repository can be switched off in the database (`Repository.enabled`) and the worker will skip it. Diffs are never stored.
 
+- `/review` comment command: comment `/review` on a PR to run a fresh review of its current commit. Only owners, members and collaborators can use it, bots are ignored, and the bot reacts with 👀 when it picks the command up. Comments it already made are not repeated.
+
 ## Planned
 
 - Next.js dashboard with GitHub login
@@ -75,7 +77,7 @@ Requirements: Node 20+, a Redis instance, a GitHub App, a Gemini API key (option
 1. **Install:** `npm install`
 2. **Create a GitHub App** (Settings → Developer settings → GitHub Apps) with:
    - Permissions: Pull requests (read & write), Issues (read & write), Contents (read), Metadata (read)
-   - Subscribe to the **Pull request** event
+   - Subscribe to the **Pull request** and **Issue comment** events (the latter is needed for `/review`)
    - A webhook secret you generate yourself
    - Generate a private key (`.pem`) and install the app on a test repository
 3. **Redis:** run `docker compose up -d redis`, or use a hosted instance such as Upstash (use the `rediss://` URL).

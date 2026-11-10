@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewJob } from "../src/queue/reviewQueue.js";
+import type { ResolvedReviewJob } from "../src/queue/reviewQueue.js";
 import type { ReviewOutcome } from "../src/services/reviewPipeline.js";
 import { beginReview, failReview, finishReview, fingerprintOf } from "../src/services/reviewStore.js";
 import { estimateCostUsd } from "../src/utils/cost.js";
 
-const job: ReviewJob = {
+const job: ResolvedReviewJob = {
+  trigger: "pull_request",
   deliveryId: "d",
   installationId: 11,
   accountLogin: "octo",
@@ -79,6 +80,16 @@ describe("finishReview", () => {
     expect(row.fingerprint).toBe(fingerprintOf("a.ts", "Missing await."));
     expect(data.usageEvents.create).toMatchObject({ installationId: 1, tokens: 1200 });
     expect(data.usageEvents.create.month).toMatch(/^\d{4}-\d{2}$/);
+  });
+
+  it("append mode (manual /review re-run) keeps earlier comments and usage instead of replacing them", async () => {
+    const f = fakeDb();
+    await finishReview(f.db, began, outcome, 10, { append: true });
+    const { data } = f.find("review.update");
+    expect(data.comments.deleteMany).toBeUndefined();
+    expect(data.comments.create).toHaveLength(1);
+    expect(data.usageEvents.deleteMany).toBeUndefined();
+    expect(data.usageEvents.create.tokens).toBe(1200);
   });
 
   it("stores skipped reviews with their reason and no comments or usage", async () => {

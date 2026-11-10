@@ -1,26 +1,25 @@
 import { Worker } from "bullmq";
 import pino from "pino";
+import { config } from "../config.js";
 import { connection, REVIEW_QUEUE, type ReviewJob } from "../queue/reviewQueue.js";
 import { getInstallationOctokit } from "../services/github.js";
+import { createLlm } from "../services/llm.js";
+import { reviewPullRequest } from "../services/reviewPipeline.js";
 
 const log = pino();
+const llm = createLlm({ provider: config.LLM_PROVIDER, apiKey: config.LLM_API_KEY, model: config.LLM_MODEL });
 
-// Week 1: prove the full loop by posting a hardcoded comment. Replaced by the real review pipeline in Week 2.
 const worker = new Worker<ReviewJob>(
   REVIEW_QUEUE,
   async (job) => {
-    const { installationId, repo, prNumber, headSha } = job.data;
+    const { installationId, repo, prNumber } = job.data;
     const [owner, name] = repo.split("/");
     const octokit = await getInstallationOctokit(installationId);
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo: name,
-      issue_number: prNumber,
-      body: `AI Code Reviewer saw commit \`${headSha.slice(0, 7)}\`. Real review coming soon.`,
-    });
-    log.info({ repo, prNumber, headSha }, "posted placeholder comment");
+    const outcome = await reviewPullRequest(octokit, llm, { owner, repo: name, prNumber }, log);
+    log.info({ repo, prNumber, ...outcome }, "review finished");
   },
   { connection, concurrency: 2 },
 );
 
 worker.on("failed", (job, err) => log.error({ jobId: job?.id, err: err.message }, "review job failed"));
+log.info(`review worker started (llm: ${llm.model})`);

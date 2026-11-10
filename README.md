@@ -1,160 +1,134 @@
 # AI Code Reviewer
 
-An AI-powered GitHub Pull Request Reviewer that automatically analyzes code changes, identifies potential bugs, security vulnerabilities, performance issues, and code quality problems, and posts intelligent review comments directly on GitHub.
+A GitHub App that reviews pull requests with an LLM. When a PR is opened or updated, it fetches the diff, asks the model for structured feedback, and posts a summary plus inline comments on the PR.
 
-## Overview
+**Status:** under development. The webhook → queue → LLM review → inline comments loop works end to end. The database and dashboard are not built yet.
 
-AI Code Reviewer is a GitHub App designed to automate the initial code review process using Large Language Models (LLMs).
-
-Whenever a developer creates or updates a Pull Request, the application receives a GitHub webhook, retrieves the code changes, analyzes the diff using an AI model, and posts actionable feedback directly on the Pull Request.
-
-The goal is to help developers identify potential problems early, improve code quality, and reduce manual code review effort.
-
-**Project Status:** Under Development
-
-## Key Features
-
-### Automated Pull Request Reviews
-- Automatically detect newly opened and updated Pull Requests.
-- Retrieve changed files and code differences using GitHub APIs.
-- Analyze code changes using an LLM.
-
-### AI-Powered Code Analysis
-- Detect potential bugs and logical errors.
-- Identify security vulnerabilities.
-- Highlight performance issues.
-- Identify code quality and maintainability problems.
-- Suggest possible improvements and corrections.
-
-### GitHub Integration
-- GitHub App authentication.
-- Webhook-based event processing.
-- Automatic review summaries.
-- Inline comments on relevant changed lines.
-
-### Background Processing
-- Process code reviews asynchronously.
-- Handle multiple Pull Request events.
-- Prevent duplicate processing of webhook events.
-- Track review processing status.
-
-### Review Management
-- Store Pull Request review history.
-- Categorize findings by severity.
-- Maintain review results and suggestions.
-
-## How It Works
-
-1. A developer creates or updates a Pull Request on GitHub.
-2. GitHub sends a webhook event to the application.
-3. The backend validates the webhook and identifies the Pull Request.
-4. The application retrieves the Pull Request diff using GitHub APIs.
-5. A background job is created for code analysis.
-6. The LLM analyzes the changed code and generates review findings.
-7. The backend validates and processes the AI-generated findings.
-8. Review summaries and inline comments are posted directly on GitHub.
-
-## Proposed Architecture
+## How it works
 
 ```text
-Developer
-    |
-    v
-GitHub Pull Request
-    |
-    v
-GitHub Webhook
-    |
-    v
-ASP.NET Core Web API
-    |
-    v
-Webhook Validation
-    |
-    v
-Background Job Queue
-    |
-    v
-Code Review Worker
-    |
-    +--------------------+
-    |                    |
-    v                    v
-GitHub API            LLM API
-    |                    |
-    v                    v
-Pull Request Diff    AI Code Analysis
-    |                    |
-    +---------+----------+
-              |
-              v
-       Review Validation
-              |
-              v
-       Review Findings
-              |
-              v
-    GitHub Review Comments
+Developer opens / updates a PR
+        |
+     GitHub --webhook--> API  POST /webhooks/github
+                           - verify HMAC signature
+                           - enqueue job (jobId = repo-pr-sha, so retries are idempotent)
+                           - reply 202 immediately
+                                   |
+                              Redis + BullMQ
+                                   |
+                              Review worker
+        1. Authenticate as the GitHub App installation
+        2. Fetch PR details and changed files
+        3. Filter out lockfiles, build output, minified files, images
+        4. Parse diffs, number lines, chunk to a token budget
+        5. Call the LLM (JSON output, validated with Zod, one retry)
+        6. Drop comments that are not on lines inside the diff, de-duplicate, rank, cap at 15
+        7. Post ONE review (event = COMMENT) with a summary and inline comments
 ```
 
-## Proposed Technology Stack
+The webhook only verifies and enqueues, because GitHub expects a reply within 10 seconds and LLM calls take longer.
 
-| Component | Technology |
+## Implemented
+
+- GitHub App authentication and signature-verified webhooks
+- Redis/BullMQ queue with retries, exponential backoff and idempotent job IDs
+- File filtering and prioritisation (source, then tests, config, docs)
+- Unified-diff parser that maps comments to valid new-file lines
+- Structured LLM output: Zod validation, schema-constrained Gemini responses, retry on invalid output
+- Pluggable LLM provider (`fake` for offline testing, `gemini`)
+- Inline comments with GitHub suggestion blocks
+- Secret redaction: API keys, tokens and private keys are masked before code reaches the LLM, and flagged as critical comments
+- No repeated comments: comments already posted on earlier commits of a PR are skipped
+- Per-repo `.aireview.yml` (read from the base branch, so a PR cannot rewrite its own reviewer rules)
+- Size guard: very large PRs are capped, lower-priority files are skipped and the review says so
+- Unit tests (Vitest) for signature checks, filtering, diff parsing, chunking, redaction, config and comment validation
+
+## Planned
+
+- PostgreSQL + Prisma for review history and token/cost tracking
+- Next.js dashboard with GitHub login
+- Live status (SSE), analytics, `/review` slash command
+- Evaluation set with precision/recall, Docker, CI, deployment
+
+## Tech stack
+
+Node.js, TypeScript, Express, BullMQ + Redis, Octokit (`@octokit/app`), Zod, Pino, Vitest. LLM: Google Gemini (other providers can be added behind the `LlmClient` interface).
+
+## Project layout
+
+```text
+apps/api/
+  src/
+    routes/      webhook endpoint
+    services/    github, llm, prompt, review pipeline, schema
+    queue/       BullMQ queue
+    workers/     review worker
+    utils/       signature check, file filter, diff parser, chunking, comment validation
+  test/
+```
+
+## Local setup
+
+Requirements: Node 20+, a Redis instance, a GitHub App, a Gemini API key (optional, `fake` provider works without one).
+
+1. **Install:** `npm install`
+2. **Create a GitHub App** (Settings → Developer settings → GitHub Apps) with:
+   - Permissions: Pull requests (read & write), Issues (read & write), Contents (read), Metadata (read)
+   - Subscribe to the **Pull request** event
+   - A webhook secret you generate yourself
+   - Generate a private key (`.pem`) and install the app on a test repository
+3. **Redis:** run `docker compose up -d redis`, or use a hosted instance such as Upstash (use the `rediss://` URL).
+4. **Configure:** copy `.env.example` to `.env` and fill in your values. Never put real secrets in `.env.example`.
+   - `GITHUB_PRIVATE_KEY` must be on one line with `\n` in place of line breaks.
+   - `LLM_PROVIDER=gemini` and `LLM_API_KEY=...` to use Gemini; leave as `fake` to test without a key.
+5. **Forward webhooks to localhost** with [smee.io](https://smee.io): set the channel URL as the app's Webhook URL, then run
+   `npx smee-client --url https://smee.io/<channel> --target http://localhost:3001/webhooks/github`
+6. **Run:** in two terminals, `npm run dev:api` and `npm run dev:worker`.
+7. Open a (non-draft) PR on the test repository.
+
+Run checks with `npm run typecheck` and `npm test`.
+
+## Per-repo configuration
+
+Add `.aireview.yml` to the default branch of the repository being reviewed. All fields are optional.
+
+```yaml
+enabled: true
+severity_threshold: warning   # critical | warning | suggestion | nitpick. "warning" hides suggestions and nitpicks
+max_comments: 10              # 1-30
+ignore_paths:
+  - "docs/**"
+  - "**/*.generated.ts"
+focus:                        # bug | security | performance | maintainability | testing
+  - security
+  - performance
+custom_instructions: |
+  We use Result types instead of exceptions. Flag any thrown errors.
+```
+
+An invalid file is ignored (defaults are used) and the review says why.
+
+## Environment variables
+
+| Variable | Purpose |
 |---|---|
-| Backend | C#, ASP.NET Core Web API |
-| GitHub Integration | GitHub Apps and GitHub REST API |
-| Webhooks | GitHub Webhooks |
-| AI Integration | LLM API |
-| Background Processing | Background Worker / RabbitMQ |
-| Database | SQL Server or PostgreSQL |
-| ORM / Data Access | Entity Framework Core or Dapper |
-| API Documentation | Swagger / OpenAPI |
-| Version Control | Git and GitHub |
-| Deployment | Docker and Cloud Hosting |
+| `GITHUB_APP_ID` | GitHub App ID |
+| `GITHUB_PRIVATE_KEY` | App private key (single line, `\n` for newlines) |
+| `GITHUB_WEBHOOK_SECRET` | Secret used to verify webhook signatures |
+| `REDIS_URL` | Redis connection URL |
+| `LLM_PROVIDER` | `fake` or `gemini` |
+| `LLM_API_KEY` | Provider API key |
+| `LLM_MODEL` | Optional model override (default `gemini-2.5-flash`) |
 
-## Planned AI Review Categories
+## Security notes
 
-| Category | Description |
-|---|---|
-| Bug Detection | Identifies potential logical errors and runtime issues |
-| Security Review | Highlights common security vulnerabilities |
-| Performance Review | Identifies inefficient operations |
-| Code Quality | Suggests improvements in readability and maintainability |
-| Best Practices | Checks coding conventions and development practices |
-| Test Coverage | Identifies changes that may need additional tests |
+- Webhook signatures are verified with a constant-time comparison on the raw body.
+- The bot only posts `COMMENT` reviews. It never approves or requests changes.
+- The PR title, description and code are treated as untrusted data in the prompt to resist prompt injection.
+- Full diffs and tokens are not logged. Diffs are not stored.
+- The LLM provider receives the changed code. Do not point the bot at confidential repositories while using a provider whose terms allow training on your data (for example, free tiers).
 
-## Project Goals
+## Limitations
 
-- Understand GitHub App development and API integrations.
-- Implement webhook-based event-driven architecture.
-- Build asynchronous background processing.
-- Integrate LLMs into a real-world developer workflow.
-- Improve automated code analysis and review quality.
-- Learn secure authentication and cloud deployment.
-
-## Future Enhancements
-
-- Support for multiple programming languages.
-- Configurable review rules.
-- AI-generated code fixes.
-- Pull Request summaries.
-- Automated test case suggestions.
-- Review analytics dashboard.
-- Repository-level review configuration.
-
-## Security Considerations
-
-- Verify GitHub webhook signatures.
-- Use minimum required GitHub App permissions.
-- Securely store API keys and application secrets.
-- Avoid exposing sensitive source code or credentials in logs.
-- Validate AI-generated comments before publishing.
-- Treat repository content as untrusted input to prevent prompt injection.
-
-## Project Status
-
-This project is currently under development. Features and architecture may evolve as implementation progresses.
-
----
-
-**Built to explore the intersection of Backend Engineering, GitHub API Integration, Event-Driven Architecture, and Artificial Intelligence.**
+- The model sees only the diff, not the whole repository or a compiler, so it can miss problems and occasionally raise a false one. Run your compiler, linter and tests in CI alongside it.
+- Secret redaction, review history storage and the dashboard are not implemented yet.

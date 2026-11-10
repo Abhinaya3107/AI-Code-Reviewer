@@ -81,7 +81,13 @@ export async function reviewPullRequest(
     "review prepared",
   );
 
-  const body = `## AI Code Review\n\n${merged.summary}\n\n**Overall risk:** ${merged.risk}\n\n_Reviewed ${files.length} file(s) with \`${llm.model}\`._`;
+  const droppedNote =
+    outcome.droppedInvalidLine > 0
+      ? ` ${outcome.droppedInvalidLine} comment(s) were skipped because they pointed at lines outside the diff.`
+      : "";
+  const body =
+    `## AI Code Review\n\n${merged.summary}\n\n**Overall risk:** ${merged.risk}\n\n` +
+    `_Reviewed ${files.length} file(s) with \`${llm.model}\`, ${outcome.kept.length} inline comment(s).${droppedNote}_`;
   await postReview(octokit, ref, { headSha: pr.headSha, body, comments: outcome.kept });
 
   return { status: "completed", commentsPosted: outcome.kept.length, droppedComments: dropped };

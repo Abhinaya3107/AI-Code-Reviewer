@@ -1,3 +1,5 @@
+import { CATEGORIES, SEVERITIES } from "./reviewSchema.js";
+
 /** Anything that can turn a prompt into raw JSON text. Real providers (Claude, OpenAI) plug in here. */
 export interface LlmClient {
   readonly model: string;
@@ -34,6 +36,30 @@ export class FakeLlm implements LlmClient {
   }
 }
 
+const GEMINI_REVIEW_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    summary: { type: "STRING" },
+    overall_risk: { type: "STRING", enum: ["low", "medium", "high"] },
+    comments: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          path: { type: "STRING" },
+          line: { type: "INTEGER" },
+          severity: { type: "STRING", enum: [...SEVERITIES] },
+          category: { type: "STRING", enum: [...CATEGORIES] },
+          message: { type: "STRING" },
+          suggested_fix: { type: "STRING" },
+        },
+        required: ["path", "line", "severity", "category", "message"],
+      },
+    },
+  },
+  required: ["summary", "overall_risk", "comments"],
+};
+
 /** Google Gemini via the REST API. Uses JSON mode and a low temperature for consistent reviews. */
 export class GeminiLlm implements LlmClient {
   constructor(
@@ -49,7 +75,12 @@ export class GeminiLlm implements LlmClient {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: "application/json",
+          // Constrains the output so enum fields (severity, category) can't be mixed up or invented.
+          responseSchema: GEMINI_REVIEW_SCHEMA,
+        },
       }),
       signal: AbortSignal.timeout(120_000),
     });

@@ -3,10 +3,13 @@ import { SEVERITIES, type ReviewComment } from "../services/reviewSchema.js";
 
 export interface ValidateOptions {
   maxComments: number;
+  /** Lowest severity to keep (e.g. "warning" drops suggestions and nitpicks). Default: keep all. */
+  minSeverity?: ReviewComment["severity"];
 }
 
 export interface ValidateOutcome {
   kept: ReviewComment[];
+  droppedBelowThreshold: number;
   droppedInvalidLine: number;
   droppedDuplicate: number;
   droppedOverCap: number;
@@ -22,14 +25,20 @@ export const fingerprint = (c: Pick<ReviewComment, "path" | "line" | "message">)
 export function validateComments(
   comments: ReviewComment[],
   validLinesByPath: Map<string, Set<number>>,
-  { maxComments }: ValidateOptions,
+  { maxComments, minSeverity = "nitpick" }: ValidateOptions,
 ): ValidateOutcome {
   let droppedInvalidLine = 0;
   let droppedDuplicate = 0;
+  let droppedBelowThreshold = 0;
   const seen = new Set<string>();
   const valid: ReviewComment[] = [];
+  const limit = SEVERITIES.indexOf(minSeverity);
 
   for (const c of comments) {
+    if (SEVERITIES.indexOf(c.severity) > limit) {
+      droppedBelowThreshold++;
+      continue;
+    }
     if (!validLinesByPath.get(c.path)?.has(c.line)) {
       droppedInvalidLine++;
       continue;
@@ -45,5 +54,5 @@ export function validateComments(
 
   valid.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
   const kept = valid.slice(0, maxComments);
-  return { kept, droppedInvalidLine, droppedDuplicate, droppedOverCap: valid.length - kept.length };
+  return { kept, droppedBelowThreshold, droppedInvalidLine, droppedDuplicate, droppedOverCap: valid.length - kept.length };
 }

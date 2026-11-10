@@ -37,13 +37,14 @@ The webhook only verifies and enqueues, because GitHub expects a reply within 10
 - Structured LLM output: Zod validation, schema-constrained Gemini responses, retry on invalid output
 - Pluggable LLM provider (`fake` for offline testing, `gemini`)
 - Inline comments with GitHub suggestion blocks
-- Unit tests (Vitest) for signature checks, filtering, diff parsing, chunking and comment validation
+- Secret redaction: API keys, tokens and private keys are masked before code reaches the LLM, and flagged as critical comments
+- No repeated comments: comments already posted on earlier commits of a PR are skipped
+- Per-repo `.aireview.yml` (read from the base branch, so a PR cannot rewrite its own reviewer rules)
+- Size guard: very large PRs are capped, lower-priority files are skipped and the review says so
+- Unit tests (Vitest) for signature checks, filtering, diff parsing, chunking, redaction, config and comment validation
 
 ## Planned
 
-- Secret redaction before code is sent to the LLM
-- Skip comments already posted on earlier commits
-- Per-repo `.aireview.yml` configuration
 - PostgreSQL + Prisma for review history and token/cost tracking
 - Next.js dashboard with GitHub login
 - Live status (SSE), analytics, `/review` slash command
@@ -86,6 +87,26 @@ Requirements: Node 20+, a Redis instance, a GitHub App, a Gemini API key (option
 7. Open a (non-draft) PR on the test repository.
 
 Run checks with `npm run typecheck` and `npm test`.
+
+## Per-repo configuration
+
+Add `.aireview.yml` to the default branch of the repository being reviewed. All fields are optional.
+
+```yaml
+enabled: true
+severity_threshold: warning   # critical | warning | suggestion | nitpick. "warning" hides suggestions and nitpicks
+max_comments: 10              # 1-30
+ignore_paths:
+  - "docs/**"
+  - "**/*.generated.ts"
+focus:                        # bug | security | performance | maintainability | testing
+  - security
+  - performance
+custom_instructions: |
+  We use Result types instead of exceptions. Flag any thrown errors.
+```
+
+An invalid file is ignored (defaults are used) and the review says why.
 
 ## Environment variables
 

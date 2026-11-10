@@ -33,8 +33,12 @@ webhooksRouter.post("/webhooks/github", express.raw({ type: "application/json" }
       {
         deliveryId,
         installationId: payload.installation.id,
+        accountLogin: payload.installation.account?.login ?? payload.repository.owner.login,
+        repoId: payload.repository.id,
         repo: payload.repository.full_name,
         prNumber: pr.number,
+        prTitle: String(pr.title ?? "").slice(0, 300),
+        prAuthor: pr.user?.login ?? "unknown",
         headSha: pr.head.sha,
       },
       // Same repo+PR+sha => same job id => GitHub redeliveries are no-ops.

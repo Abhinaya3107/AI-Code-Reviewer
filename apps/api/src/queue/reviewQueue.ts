@@ -5,8 +5,12 @@ import { config } from "../config.js";
 export interface ReviewJob {
   deliveryId: string;
   installationId: number;
+  accountLogin: string;
+  repoId: number;
   repo: string; // owner/name
   prNumber: number;
+  prTitle: string;
+  prAuthor: string;
   headSha: string;
 }
 

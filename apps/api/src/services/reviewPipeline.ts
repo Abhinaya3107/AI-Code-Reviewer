@@ -25,13 +25,15 @@ const MAX_TOTAL_CHARS = 240_000; // ~60k tokens per PR: beyond this, lower-prior
 const RISK_ORDER = ["low", "medium", "high"] as const;
 
 /** Calls the LLM and validates the JSON. On a parse/schema failure, retries once with the error. */
-async function reviewChunk(llm: LlmClient, system: string, user: string): Promise<ReviewResult> {
+async function reviewChunk(llm: LlmClient, system: string, user: string, usage: Usage): Promise<ReviewResult> {
   let prompt = user;
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await llm.review({ system, user: prompt });
+    const res = await llm.review({ system, user: prompt });
+    usage.inputTokens += res.inputTokens ?? 0; // a retry costs tokens too
+    usage.outputTokens += res.outputTokens ?? 0;
     try {
-      const json = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim());
+      const json = JSON.parse(res.text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim());
       return reviewResultSchema.parse(json);
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -41,11 +43,23 @@ async function reviewChunk(llm: LlmClient, system: string, user: string): Promis
   throw new Error(`LLM returned invalid output twice: ${lastError.slice(0, 300)}`);
 }
 
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface ReviewOutcome {
   status: "completed" | "skipped";
   reason?: string;
   commentsPosted?: number;
   droppedComments?: number;
+  /** Everything below is set only when status is "completed". */
+  summary?: string;
+  risk?: ReviewResult["overall_risk"];
+  model?: string;
+  filesReviewed?: number;
+  usage?: Usage;
+  comments?: ReviewComment[];
 }
 
 export async function reviewPullRequest(
@@ -97,9 +111,10 @@ export async function reviewPullRequest(
   }
 
   const system = buildSystemPrompt(cfg);
+  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
   const results: ReviewResult[] = [];
   for (const chunk of chunkByBudget(parsed, MAX_CHUNK_CHARS)) {
-    results.push(await reviewChunk(llm, system, buildUserPrompt(pr, chunk)));
+    results.push(await reviewChunk(llm, system, buildUserPrompt(pr, chunk), usage));
   }
 
   const risk = results.reduce(
@@ -154,5 +169,15 @@ export async function reviewPullRequest(
     (notes.length ? `\n\n${notes.map((n) => `- ${n}`).join("\n")}` : "");
   await postReview(octokit, ref, { headSha: pr.headSha, body, comments: outcome.kept });
 
-  return { status: "completed", commentsPosted: outcome.kept.length, droppedComments: dropped };
+  return {
+    status: "completed",
+    commentsPosted: outcome.kept.length,
+    droppedComments: dropped,
+    summary,
+    risk,
+    model: llm.model,
+    filesReviewed: parsed.length,
+    usage,
+    comments: outcome.kept,
+  };
 }

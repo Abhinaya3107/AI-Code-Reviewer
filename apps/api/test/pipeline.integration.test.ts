@@ -58,7 +58,7 @@ function scriptedLlm(comments: object[] = [], overall_risk = "low") {
     model: "scripted",
     review: async (args) => {
       seen.push(args);
-      return JSON.stringify({ summary: "ok", overall_risk, comments });
+      return { text: JSON.stringify({ summary: "ok", overall_risk, comments }), inputTokens: 100, outputTokens: 20 };
     },
   };
   return { llm, seen };
@@ -92,6 +92,16 @@ describe("pipeline: secret redaction", () => {
     expect(review.body).toContain("2 possible secret(s) were detected and masked");
     // The review itself must not contain the secret either.
     expect(JSON.stringify(review)).not.toContain("hunter2-not-a-real-one");
+  });
+});
+
+describe("pipeline: usage reporting", () => {
+  it("returns summed token usage, the model and the kept comments for storage", async () => {
+    const gh = fakeGithub({ files: [{ filename: "src/a.ts", status: "added", patch: addedFilePatch(["a", "b"]) }] });
+    const { llm } = scriptedLlm([{ path: "src/a.ts", line: 1, severity: "warning", category: "bug", message: "m" }]);
+    const out = await reviewPullRequest(gh.octokit, llm, REF, log);
+    expect(out).toMatchObject({ status: "completed", model: "scripted", filesReviewed: 1, risk: "low", usage: { inputTokens: 100, outputTokens: 20 } });
+    expect(out.comments).toHaveLength(1);
   });
 });
 

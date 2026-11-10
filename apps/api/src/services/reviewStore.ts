@@ -11,6 +11,8 @@ export const fingerprintOf = (path: string, message: string) =>
 
 export interface BeganReview {
   reviewId: number;
+  /** Internal id of the installation row (used to attribute usage). */
+  installationDbId: number;
   /** False when the repository was switched off (e.g. from the dashboard). */
   repositoryEnabled: boolean;
 }
@@ -38,14 +40,17 @@ export async function beginReview(db: PrismaClient, job: ReviewJob): Promise<Beg
     create: { pullRequestId: pullRequest.id, headSha: job.headSha, status: "running", startedAt: now, attempts: 1 },
     update: { status: "running", startedAt: now, errorMessage: null, attempts: { increment: 1 } },
   });
-  return { reviewId: review.id, repositoryEnabled: repository.enabled };
+  return { reviewId: review.id, installationDbId: installation.id, repositoryEnabled: repository.enabled };
 }
 
-/** Stores the result. Re-running the same review replaces its comments instead of duplicating them. */
+/**
+ * Stores the result in ONE request (nested writes), so it is atomic and costs a single round trip.
+ * An interactive transaction with several sequential queries timed out against a remote database.
+ * Re-running the same review replaces its comments and usage instead of duplicating them.
+ */
 export async function finishReview(
   db: PrismaClient,
-  reviewId: number,
-  installationId: number,
+  began: Pick<BeganReview, "reviewId" | "installationDbId">,
   outcome: ReviewOutcome,
   durationMs: number,
 ): Promise<void> {
@@ -53,8 +58,8 @@ export async function finishReview(
 
   if (outcome.status === "skipped") {
     await db.review.update({
-      where: { id: reviewId },
-      data: { status: "skipped", skipReason: outcome.reason ?? null, durationMs, finishedAt },
+      where: { id: began.reviewId },
+      data: { status: "skipped", skipReason: outcome.reason ?? null, errorMessage: null, durationMs, finishedAt },
     });
     return;
   }
@@ -63,27 +68,23 @@ export async function finishReview(
   const outputTokens = outcome.usage?.outputTokens ?? 0;
   const costUsd = outcome.model ? estimateCostUsd(outcome.model, inputTokens, outputTokens) : null;
 
-  await db.$transaction(async (tx) => {
-    await tx.review.update({
-      where: { id: reviewId },
-      data: {
-        status: "completed",
-        summary: outcome.summary ?? null,
-        overallRisk: outcome.risk ?? null,
-        model: outcome.model ?? null,
-        inputTokens,
-        outputTokens,
-        costUsd,
-        durationMs,
-        filesReviewed: outcome.filesReviewed ?? null,
-        finishedAt,
-      },
-    });
-    await tx.reviewComment.deleteMany({ where: { reviewId } });
-    if (outcome.comments?.length) {
-      await tx.reviewComment.createMany({
-        data: outcome.comments.map((c) => ({
-          reviewId,
+  await db.review.update({
+    where: { id: began.reviewId },
+    data: {
+      status: "completed",
+      summary: outcome.summary ?? null,
+      overallRisk: outcome.risk ?? null,
+      model: outcome.model ?? null,
+      inputTokens,
+      outputTokens,
+      costUsd,
+      durationMs,
+      filesReviewed: outcome.filesReviewed ?? null,
+      errorMessage: null, // a success after an earlier failed attempt clears the old error
+      finishedAt,
+      comments: {
+        deleteMany: {},
+        create: (outcome.comments ?? []).map((c) => ({
           path: c.path,
           line: c.line,
           severity: c.severity,
@@ -92,22 +93,21 @@ export async function finishReview(
           suggestedFix: c.suggested_fix ?? null,
           fingerprint: fingerprintOf(c.path, c.message),
         })),
-      });
-    }
-    if (inputTokens + outputTokens > 0) {
-      const installation = await tx.installation.findUnique({ where: { githubInstallationId: BigInt(installationId) } });
-      if (installation) {
-        await tx.usageEvent.create({
-          data: {
-            installationId: installation.id,
-            reviewId,
-            month: finishedAt.toISOString().slice(0, 7),
-            tokens: inputTokens + outputTokens,
-            costUsd,
-          },
-        });
-      }
-    }
+      },
+      usageEvents: {
+        deleteMany: {},
+        ...(inputTokens + outputTokens > 0
+          ? {
+              create: {
+                installationId: began.installationDbId,
+                month: finishedAt.toISOString().slice(0, 7),
+                tokens: inputTokens + outputTokens,
+                costUsd,
+              },
+            }
+          : {}),
+      },
+    },
   });
 }
 

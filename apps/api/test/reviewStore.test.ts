@@ -39,7 +39,7 @@ describe("beginReview", () => {
   it("upserts installation, repository, pull request and review in order, keyed for idempotency", async () => {
     const f = fakeDb();
     const r = await beginReview(f.db, job);
-    expect(r).toEqual({ reviewId: 4, repositoryEnabled: true });
+    expect(r).toEqual({ reviewId: 4, installationDbId: 1, repositoryEnabled: true });
     expect(f.ops()).toEqual(["installation.upsert", "repository.upsert", "pullRequest.upsert", "review.upsert"]);
     expect(f.find("repository.upsert").where.githubRepoId).toBe(1442699472n);
     expect(f.find("review.upsert").where).toEqual({ pullRequestId_headSha: { pullRequestId: 3, headSha: "abc123" } });
@@ -63,31 +63,37 @@ describe("finishReview", () => {
     comments: [{ path: "a.ts", line: 3, severity: "warning", category: "bug", message: "Missing await.", suggested_fix: "await x();" }],
   };
 
-  it("replaces comments, stores tokens, an estimated cost and a monthly usage event", async () => {
+  const began = { reviewId: 4, installationDbId: 1 };
+
+  it("writes everything in ONE request: tokens, cost, replaced comments and a monthly usage event", async () => {
     const f = fakeDb();
-    await finishReview(f.db, 4, 11, outcome, 1234);
-    expect(f.ops()).toEqual(["review.update", "comment.deleteMany", "comment.createMany", "installation.find", "usage.create"]);
-    expect(f.find("review.update").data).toMatchObject({ status: "completed", overallRisk: "medium", inputTokens: 1000, outputTokens: 200, durationMs: 1234 });
-    expect(f.find("review.update").data.costUsd).toBeCloseTo(estimateCostUsd("gemini-2.5-flash", 1000, 200)!, 10);
-    const row = f.find("comment.createMany").data[0];
-    expect(row).toMatchObject({ reviewId: 4, path: "a.ts", line: 3, suggestedFix: "await x();" });
+    await finishReview(f.db, began, outcome, 1234);
+    expect(f.ops()).toEqual(["review.update"]); // a single round trip, no interactive transaction
+    const { data, where } = f.find("review.update");
+    expect(where).toEqual({ id: 4 });
+    expect(data).toMatchObject({ status: "completed", overallRisk: "medium", inputTokens: 1000, outputTokens: 200, durationMs: 1234, errorMessage: null });
+    expect(data.costUsd).toBeCloseTo(estimateCostUsd("gemini-2.5-flash", 1000, 200)!, 10);
+    expect(data.comments.deleteMany).toEqual({}); // re-running replaces old comments
+    const row = data.comments.create[0];
+    expect(row).toMatchObject({ path: "a.ts", line: 3, suggestedFix: "await x();" });
     expect(row.fingerprint).toBe(fingerprintOf("a.ts", "Missing await."));
-    const usage = f.find("usage.create").data;
-    expect(usage).toMatchObject({ installationId: 1, reviewId: 4, tokens: 1200 });
-    expect(usage.month).toMatch(/^\d{4}-\d{2}$/);
+    expect(data.usageEvents.create).toMatchObject({ installationId: 1, tokens: 1200 });
+    expect(data.usageEvents.create.month).toMatch(/^\d{4}-\d{2}$/);
   });
 
   it("stores skipped reviews with their reason and no comments or usage", async () => {
     const f = fakeDb();
-    await finishReview(f.db, 4, 11, { status: "skipped", reason: "draft" }, 5);
+    await finishReview(f.db, began, { status: "skipped", reason: "draft" }, 5);
     expect(f.ops()).toEqual(["review.update"]);
-    expect(f.find("review.update").data).toMatchObject({ status: "skipped", skipReason: "draft" });
+    const { data } = f.find("review.update");
+    expect(data).toMatchObject({ status: "skipped", skipReason: "draft" });
+    expect(data.comments).toBeUndefined();
   });
 
-  it("writes no usage event when the provider reported no tokens", async () => {
+  it("creates no usage event when the provider reported no tokens", async () => {
     const f = fakeDb();
-    await finishReview(f.db, 4, 11, { ...outcome, usage: { inputTokens: 0, outputTokens: 0 } }, 5);
-    expect(f.ops()).not.toContain("usage.create");
+    await finishReview(f.db, began, { ...outcome, usage: { inputTokens: 0, outputTokens: 0 } }, 5);
+    expect(f.find("review.update").data.usageEvents.create).toBeUndefined();
   });
 });
 

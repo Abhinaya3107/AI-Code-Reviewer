@@ -7,9 +7,9 @@
     "dev:worker": "tsx watch --env-file=../../.env src/workers/reviewWorker.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:studio": "prisma studio",
+    "db:generate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js generate",
+    "db:migrate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
+    "db:studio": "node --env-file=../../.env ../../node_modules/prisma/build/index.js studio",
     "postinstall": "prisma generate"
   },
   "dependencies": {

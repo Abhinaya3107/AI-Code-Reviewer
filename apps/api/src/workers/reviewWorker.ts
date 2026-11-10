@@ -35,7 +35,7 @@ const worker = new Worker<ReviewJob>(
       throw err;
     }
 
-    if (db && began) await finishReview(db, began.reviewId, installationId, outcome, Date.now() - started);
+    if (db && began) await finishReview(db, began, outcome, Date.now() - started);
     const { comments: _omit, ...summary } = outcome; // keep log lines small
     log.info({ repo, prNumber, stored: Boolean(db), ...summary }, "review finished");
   },

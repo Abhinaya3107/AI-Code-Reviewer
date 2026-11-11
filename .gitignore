@@ -4,3 +4,9 @@ dist/
 *.pem
 .next/
 coverage/
+__pycache__/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/

@@ -4,7 +4,7 @@ import time
 import fakeredis
 import pytest
 
-from reviewer.queue.redis_queue import JobQueue
+from reviewer.queue.redis_queue import POLL_TIMEOUT_S, JobQueue, create_redis
 
 
 @pytest.fixture
@@ -160,3 +160,18 @@ class TestCrashRecovery:
         await q.enqueue("job-1", {})
         results = await asyncio.gather(q.next_job(timeout_s=1), q.next_job(timeout_s=1))
         assert sorted(r is not None for r in results) == [False, True]
+
+
+class TestCreateRedis:
+    def test_the_socket_timeout_outlasts_the_longest_blocking_wait(self) -> None:
+        # redis-py 8 defaults to a ~5s read timeout, which killed every 30s blocking pop against a real server.
+        kwargs = create_redis("redis://localhost:6379").connection_pool.connection_kwargs
+        timeouts = [v for k, v in kwargs.items() if k.endswith("socket_timeout") and v is not None]
+        assert timeouts, "an explicit socket timeout must be set"
+        assert all(timeout > POLL_TIMEOUT_S for timeout in timeouts)
+
+    def test_returns_text_not_bytes(self) -> None:
+        assert (
+            create_redis("redis://localhost:6379").connection_pool.connection_kwargs["decode_responses"]
+            is True
+        )

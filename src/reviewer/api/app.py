@@ -15,7 +15,7 @@ from reviewer.api.events import to_review_job
 from reviewer.api.security import verify_signature
 from reviewer.config import Settings, get_settings
 from reviewer.logging_setup import setup_logging
-from reviewer.queue.redis_queue import JobQueue
+from reviewer.queue.redis_queue import JobQueue, create_redis
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def create_app(settings: Settings | None = None, queue: JobQueue | None = None) 
         redis: Redis | None = None
         if queue is None:
             setup_logging()
-            redis = Redis.from_url(app.state.settings.redis_url, decode_responses=True)
+            redis = create_redis(app.state.settings.redis_url)
             app.state.queue = JobQueue(redis)
         yield
         if redis is not None:

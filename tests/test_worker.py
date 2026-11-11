@@ -171,3 +171,70 @@ class TestRunner:
         assert attempts == [1, 2, 3]
         assert (await q.stats())["failed"] == 1
         await redis.aclose()
+
+
+class TestRunnerQueueErrors:
+    async def test_queue_errors_back_off_instead_of_hammering_and_recover(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        delays: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(seconds: float) -> None:
+            if seconds > 0:  # sleep(0) is the loop's own cooperative yield
+                delays.append(seconds)
+            await real_sleep(0)
+
+        monkeypatch.setattr("asyncio.sleep", fake_sleep)
+        stop = asyncio.Event()
+
+        class UnreachableQueue:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def next_job(self, timeout_s: int) -> None:
+                self.calls += 1
+                if self.calls <= 4:
+                    raise ConnectionError("Timeout reading from redis")
+                stop.set()  # Redis is back and there is simply no work: the worker shuts down cleanly
+
+        queue = UnreachableQueue()
+        handler_calls: list[QueuedJob] = []
+
+        async def handler(job: QueuedJob) -> None:
+            handler_calls.append(job)
+
+        await asyncio.wait_for(
+            run_worker(queue, handler, stop=stop, concurrency=1, poll_timeout_s=1), timeout=5
+        )  # type: ignore[arg-type]
+        assert delays == [5.0, 10.0, 20.0, 40.0]  # doubles each time (capped at 60)
+        assert handler_calls == []
+
+    async def test_the_pause_resets_after_a_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        delays: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(seconds: float) -> None:
+            if seconds > 0:
+                delays.append(seconds)
+            await real_sleep(0)
+
+        monkeypatch.setattr("asyncio.sleep", fake_sleep)
+        stop = asyncio.Event()
+        script: list[object] = [ConnectionError("x"), ConnectionError("x"), None, ConnectionError("x")]
+
+        class Scripted:
+            async def next_job(self, timeout_s: int) -> None:
+                item = script.pop(0) if script else None
+                if not script:
+                    stop.set()
+                if isinstance(item, Exception):
+                    raise item
+
+        async def handler(job: QueuedJob) -> None:
+            return None
+
+        await asyncio.wait_for(
+            run_worker(Scripted(), handler, stop=stop, concurrency=1, poll_timeout_s=1), timeout=5
+        )  # type: ignore[arg-type]
+        assert delays == [5.0, 10.0, 5.0]  # the third error starts again from 5s

@@ -10,7 +10,8 @@
     "db:generate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js generate",
     "db:migrate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
     "db:studio": "node --env-file=../../.env ../../node_modules/prisma/build/index.js studio",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "eval": "node --env-file=../../.env ../../node_modules/tsx/dist/cli.mjs ../../evals/run.ts"
   },
   "dependencies": {
     "@octokit/app": "^15.1.0",

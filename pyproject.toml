@@ -54,6 +54,6 @@ ignore = ["E501"]  # line length is the formatter's job (and the LLM prompt has 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "src"
-packages = ["reviewer"]
+mypy_path = "src:."
+packages = ["reviewer", "evals"]
 plugins = ["pydantic.mypy"]

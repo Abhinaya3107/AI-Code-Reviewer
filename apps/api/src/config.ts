@@ -10,6 +10,8 @@ const schema = z.object({
   LLM_PROVIDER: z.string().default("fake"),
   LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().optional(),
+  // Without it the worker still reviews PRs but stores nothing.
+  DATABASE_URL: z.string().optional(),
 });
 
 export const config = schema.parse(process.env);

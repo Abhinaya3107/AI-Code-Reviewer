@@ -43,9 +43,12 @@ The webhook only verifies and enqueues, because GitHub expects a reply within 10
 - Size guard: very large PRs are capped, lower-priority files are skipped and the review says so
 - Unit tests (Vitest) for signature checks, filtering, diff parsing, chunking, redaction, config and comment validation
 
+- PostgreSQL + Prisma storage: installations, repositories, pull requests, reviews (status, risk, model, tokens, estimated cost, duration), comments, and monthly usage events. One review row per (PR, commit), so retries never duplicate. A repository can be switched off in the database (`Repository.enabled`) and the worker will skip it. Diffs are never stored.
+
+- `/review` comment command: comment `/review` on a PR to run a fresh review of its current commit. Only owners, members and collaborators can use it, bots are ignored, and the bot reacts with 👀 when it picks the command up. Comments it already made are not repeated.
+
 ## Planned
 
-- PostgreSQL + Prisma for review history and token/cost tracking
 - Next.js dashboard with GitHub login
 - Live status (SSE), analytics, `/review` slash command
 - Evaluation set with precision/recall, Docker, CI, deployment
@@ -74,7 +77,7 @@ Requirements: Node 20+, a Redis instance, a GitHub App, a Gemini API key (option
 1. **Install:** `npm install`
 2. **Create a GitHub App** (Settings → Developer settings → GitHub Apps) with:
    - Permissions: Pull requests (read & write), Issues (read & write), Contents (read), Metadata (read)
-   - Subscribe to the **Pull request** event
+   - Subscribe to the **Pull request** and **Issue comment** events (the latter is needed for `/review`)
    - A webhook secret you generate yourself
    - Generate a private key (`.pem`) and install the app on a test repository
 3. **Redis:** run `docker compose up -d redis`, or use a hosted instance such as Upstash (use the `rediss://` URL).
@@ -83,8 +86,9 @@ Requirements: Node 20+, a Redis instance, a GitHub App, a Gemini API key (option
    - `LLM_PROVIDER=gemini` and `LLM_API_KEY=...` to use Gemini; leave as `fake` to test without a key.
 5. **Forward webhooks to localhost** with [smee.io](https://smee.io): set the channel URL as the app's Webhook URL, then run
    `npx smee-client --url https://smee.io/<channel> --target http://localhost:3001/webhooks/github`
-6. **Run:** in two terminals, `npm run dev:api` and `npm run dev:worker`.
-7. Open a (non-draft) PR on the test repository.
+6. **Database (optional):** set `DATABASE_URL` in `.env` to any PostgreSQL URL (local, or a free hosted one such as Neon), then create the tables once with `npm run db:migrate -w apps/api`. Without `DATABASE_URL` the bot still reviews PRs but stores nothing. Browse stored data with `npm run db:studio -w apps/api`.
+7. **Run:** in two terminals, `npm run dev:api` and `npm run dev:worker`.
+8. Open a (non-draft) PR on the test repository.
 
 Run checks with `npm run typecheck` and `npm test`.
 
@@ -131,4 +135,5 @@ An invalid file is ignored (defaults are used) and the review says why.
 ## Limitations
 
 - The model sees only the diff, not the whole repository or a compiler, so it can miss problems and occasionally raise a false one. Run your compiler, linter and tests in CI alongside it.
-- Secret redaction, review history storage and the dashboard are not implemented yet.
+- The dashboard is not implemented yet, and review history is only visible through the database.
+- Cost figures are estimates from a built-in price table and only exist for models listed in `utils/cost.ts`.

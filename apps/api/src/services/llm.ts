@@ -1,9 +1,17 @@
 import { CATEGORIES, SEVERITIES } from "./reviewSchema.js";
 
+export interface LlmResponse {
+  /** Raw JSON text returned by the model. */
+  text: string;
+  /** Token counts as reported by the provider, when available. */
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 /** Anything that can turn a prompt into raw JSON text. Real providers (Claude, OpenAI) plug in here. */
 export interface LlmClient {
   readonly model: string;
-  review(args: { system: string; user: string }): Promise<string>;
+  review(args: { system: string; user: string }): Promise<LlmResponse>;
 }
 
 /**
@@ -13,7 +21,7 @@ export interface LlmClient {
 export class FakeLlm implements LlmClient {
   readonly model = "fake-llm";
 
-  async review({ user }: { system: string; user: string }): Promise<string> {
+  async review({ user }: { system: string; user: string }): Promise<LlmResponse> {
     const file = /### File: (.+)/.exec(user)?.[1];
     const added = /^\s*(\d+) \+ /m.exec(user)?.[1];
     const comments =
@@ -28,11 +36,13 @@ export class FakeLlm implements LlmClient {
             },
           ]
         : [];
-    return JSON.stringify({
-      summary: "[demo] Placeholder review generated without a real model. Pipeline check only.",
-      overall_risk: "low",
-      comments,
-    });
+    return {
+      text: JSON.stringify({
+        summary: "[demo] Placeholder review generated without a real model. Pipeline check only.",
+        overall_risk: "low",
+        comments,
+      }),
+    };
   }
 }
 
@@ -67,7 +77,7 @@ export class GeminiLlm implements LlmClient {
     readonly model: string,
   ) {}
 
-  async review({ system, user }: { system: string; user: string }): Promise<string> {
+  async review({ system, user }: { system: string; user: string }): Promise<LlmResponse> {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
     const res = await fetch(url, {
       method: "POST",
@@ -91,10 +101,15 @@ export class GeminiLlm implements LlmClient {
     }
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
     const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
     if (!text) throw new Error(`Gemini returned no text (finishReason: ${data.candidates?.[0]?.finishReason ?? "unknown"})`);
-    return text;
+    return {
+      text,
+      inputTokens: data.usageMetadata?.promptTokenCount,
+      outputTokens: data.usageMetadata?.candidatesTokenCount,
+    };
   }
 }
 

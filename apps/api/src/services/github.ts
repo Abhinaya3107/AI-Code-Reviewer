@@ -34,7 +34,28 @@ export async function fetchPullRequest(octokit: InstallationOctokit, { owner, re
     draft: res.data.draft ?? false,
     headSha: res.data.head.sha,
     baseRef: res.data.base.ref,
+    author: res.data.user?.login ?? "unknown",
   };
+}
+
+/** Adds an emoji reaction to an issue/PR comment, e.g. to show a /review command was seen. Best effort. */
+export async function reactToComment(
+  octokit: InstallationOctokit,
+  { owner, repo }: { owner: string; repo: string },
+  commentId: number,
+  content: "eyes" | "+1" = "eyes",
+): Promise<boolean> {
+  try {
+    await octokit.request("POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions", {
+      owner,
+      repo,
+      comment_id: commentId,
+      content,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Reads a text file from the repo at a ref. Returns null if it does not exist. */

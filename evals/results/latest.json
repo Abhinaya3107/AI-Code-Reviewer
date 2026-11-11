@@ -1,0 +1,625 @@
+{
+  "date": "2026-11-11T11:22:22.591Z",
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "tolerance": 2,
+  "complete": false,
+  "validCases": 26,
+  "erroredCases": 1,
+  "summary": {
+    "cases": 26,
+    "buggyCases": 19,
+    "cleanCases": 7,
+    "bugs": 20,
+    "found": 20,
+    "recall": 1,
+    "reported": 34,
+    "truePositives": 29,
+    "precision": 0.8529411764705882,
+    "cleanCasesFlagged": 2,
+    "cleanFlaggedRate": 0.2857142857142857
+  },
+  "cases": [
+    {
+      "id": "ts-sql-injection",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "src/users.ts",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "message": "This line is vulnerable to SQL injection. The `email` parameter is directly concatenated into the SQL query, allowing malicious input to alter the query's intent. An attacker could bypass authentication or extract sensitive data.",
+          "suggested_fix": "const sql = \"SELECT id, name FROM users WHERE email = ?\"; const rows = await db.query(sql, [email]);"
+        }
+      ]
+    },
+    {
+      "id": "ts-missing-await",
+      "bugs": 1,
+      "found": 1,
+      "reported": 2,
+      "truePositives": 2,
+      "falsePositives": 0,
+      "seededBugLines": [
+        5
+      ],
+      "comments": [
+        {
+          "path": "src/save.ts",
+          "line": 5,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The `db.insert` call is likely an asynchronous operation and should be `await`ed. Without `await`, the function will return before all database operations are complete, potentially leading to data loss, unhandled promise rejections, and an incorrect return value for `items.length`.",
+          "suggested_fix": "await db.insert(\"items\", { value: item });"
+        },
+        {
+          "path": "src/save.ts",
+          "line": 4,
+          "severity": "warning",
+          "category": "performance",
+          "message": "Even with `await` added, performing inserts sequentially in a loop can be slow for a large number of items. For bulk saving, it's generally more performant to use a single bulk insert operation provided by the database library, if available, or to run all inserts concurrently using `Promise.all`.",
+          "suggested_fix": "const insertPromises = items.map(item => db.insert(\"items\", { value: item })); await Promise.all(insertPromises);"
+        }
+      ]
+    },
+    {
+      "id": "ts-off-by-one",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        3
+      ],
+      "comments": [
+        {
+          "path": "src/lastN.ts",
+          "line": 3,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The loop condition `i <= items.length` is an off-by-one error. Array indices go up to `items.length - 1`. Accessing `items[items.length]` will result in `undefined`. Additionally, the starting index `items.length - n` can be negative if `n` is greater than `items.length`, which will also lead to `undefined` values being pushed. If `n` is 0, the current logic will start at `items.length` and push `undefined` once, instead of returning an empty array. The starting index should be clamped to 0, and the loop should iterate up to (but not including) `items.length`.",
+          "suggested_fix": "for (let i = Math.max(0, items.length - n); i < items.length; i++) {"
+        }
+      ]
+    },
+    {
+      "id": "ts-assignment-in-condition",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "src/perm.ts",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "message": "This line uses an assignment operator (`=`) instead of a comparison operator (`===`). This will assign the string 'admin' to `user.role` and then evaluate the truthiness of 'admin', which is always true. As a result, the `canDelete` function will always return `true` for any user, regardless of their actual role, bypassing the intended permission check.",
+          "suggested_fix": "if (user.role === \"admin\") {"
+        }
+      ]
+    },
+    {
+      "id": "ts-property-typo",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        6
+      ],
+      "comments": [
+        {
+          "path": "src/average.ts",
+          "line": 6,
+          "severity": "critical",
+          "category": "bug",
+          "message": "There is a typo in `nums.lenght`. It should be `nums.length`. As written, `nums.lenght` will evaluate to `undefined`, causing the division to result in `NaN`.",
+          "suggested_fix": "return total / nums.length;"
+        }
+      ]
+    },
+    {
+      "id": "ts-hardcoded-password",
+      "bugs": 1,
+      "found": 1,
+      "reported": 4,
+      "truePositives": 4,
+      "falsePositives": 0,
+      "seededBugLines": [
+        7
+      ],
+      "comments": [
+        {
+          "path": "src/db.ts",
+          "line": 7,
+          "severity": "critical",
+          "category": "security",
+          "message": "Possible secret (hardcoded-credential) added here. It was masked before this review, but it is now in the git history. Revoke and rotate it, and load it from an environment variable or secret manager instead."
+        },
+        {
+          "path": "src/db.ts",
+          "line": 7,
+          "severity": "critical",
+          "category": "security",
+          "message": "Hardcoding credentials, especially passwords, is a severe security vulnerability. These should be loaded from environment variables, a secrets manager, or a secure configuration system at runtime, not stored directly in the code.",
+          "suggested_fix": "password: process.env.DB_PASSWORD,"
+        },
+        {
+          "path": "src/db.ts",
+          "line": 5,
+          "severity": "warning",
+          "category": "maintainability",
+          "message": "Hardcoding the database host and user makes the application less flexible and harder to deploy in different environments (e.g., development, staging, production). These values should ideally be configurable, for example, via environment variables.",
+          "suggested_fix": "host: process.env.DB_HOST || \"db.internal\","
+        },
+        {
+          "path": "src/db.ts",
+          "line": 6,
+          "severity": "warning",
+          "category": "maintainability",
+          "message": "Hardcoding the database user makes the application less flexible and harder to deploy in different environments. This value should ideally be configurable, for example, via environment variables.",
+          "suggested_fix": "user: process.env.DB_USER || \"admin\","
+        }
+      ]
+    },
+    {
+      "id": "ts-command-injection",
+      "bugs": 1,
+      "found": 1,
+      "reported": 2,
+      "truePositives": 2,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "src/ls.ts",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "message": "Using `exec` with user-controlled input (`dir`) directly interpolated into the shell command creates a severe command injection vulnerability. An attacker can execute arbitrary commands by crafting a malicious `dir` string (e.g., `'; rm -rf /;'`). It is highly recommended to use `execFile` for executing commands with arguments, or `fs.readdir` for listing directories, which avoids shell execution entirely.",
+          "suggested_fix": "execFile('ls', ['-la', dir], (err, stdout) => {"
+        },
+        {
+          "path": "src/ls.ts",
+          "line": 5,
+          "severity": "critical",
+          "category": "bug",
+          "message": "If the `exec` command fails, `throw err` will crash the entire Node.js process. Errors from asynchronous operations should be handled gracefully, typically by passing them to the callback function or logging them, rather than throwing them synchronously from within an async callback. Given the current callback signature, logging the error and calling the callback with an empty string is a safer approach to prevent crashes, though ideally the callback should be updated to accept an error parameter.",
+          "suggested_fix": "if (err) { console.error('Failed to list directory:', err); cb(''); return; }"
+        }
+      ]
+    },
+    {
+      "id": "ts-path-traversal",
+      "bugs": 1,
+      "found": 1,
+      "reported": 3,
+      "truePositives": 2,
+      "falsePositives": 1,
+      "seededBugLines": [
+        7
+      ],
+      "comments": [
+        {
+          "path": "src/uploads.ts",
+          "line": 7,
+          "severity": "critical",
+          "category": "security",
+          "message": "The `path.join` function does not sanitize the `name` input, making the function vulnerable to path traversal attacks. An attacker could use `../` sequences in `name` (e.g., `../../etc/passwd`) to read arbitrary files outside the `/srv/uploads` directory. A robust fix would involve resolving the full path and ensuring it remains within the base directory, which typically requires additional lines of code for validation.",
+          "suggested_fix": "const full = path.resolve(BASE, name);"
+        },
+        {
+          "path": "src/uploads.ts",
+          "line": 8,
+          "severity": "warning",
+          "category": "bug",
+          "message": "The `readFile` function is hardcoded to use `\"utf8\"` encoding. This will corrupt binary files (e.g., images, PDFs) if they are uploaded and served through this function. Consider returning a `Buffer` (by omitting the encoding) or allowing the caller to specify the encoding if binary files are expected.",
+          "suggested_fix": "return readFile(full);"
+        },
+        {
+          "path": "src/uploads.ts",
+          "line": 4,
+          "severity": "suggestion",
+          "category": "maintainability",
+          "message": "The upload base directory is hardcoded. It would be more flexible to configure this path via an environment variable or a configuration file, especially for different deployment environments or local development.",
+          "suggested_fix": "const BASE = process.env.UPLOAD_DIR || \"/srv/uploads\";"
+        }
+      ]
+    },
+    {
+      "id": "ts-xss-innerhtml",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        2
+      ],
+      "comments": [
+        {
+          "path": "src/render.ts",
+          "line": 2,
+          "severity": "critical",
+          "category": "security",
+          "message": "Directly assigning user-provided `comment` to `innerHTML` can lead to a Cross-Site Scripting (XSS) vulnerability. If the `comment` string contains malicious HTML or script tags, they will be executed in the user's browser.",
+          "suggested_fix": "If the intention is to display the comment as plain text, use `textContent` instead of `innerHTML` to prevent XSS. If rich text is intended, the `comment` string must be thoroughly sanitized before being assigned to `innerHTML`.\nel.textContent = comment;"
+        }
+      ]
+    },
+    {
+      "id": "ts-null-deref",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "src/names.ts",
+          "line": 4,
+          "severity": "critical",
+          "category": "bug",
+          "message": "If `users.find((u) => u.id === id)` does not find a matching user, it will return `undefined`. Attempting to access `.name` on `undefined` will cause a `TypeError` at runtime. This function should handle the case where no user is found.",
+          "suggested_fix": "const user = users.find((u) => u.id === id); return user ? user.name : \"\";"
+        }
+      ]
+    },
+    {
+      "id": "ts-default-sort",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        2
+      ],
+      "comments": [
+        {
+          "path": "src/scores.ts",
+          "line": 2,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The `sort()` method without a compare function will sort elements as strings lexicographically. For an array of numbers, this will lead to incorrect sorting (e.g., 10 comes before 2). To sort numbers correctly, a compare function must be provided.",
+          "suggested_fix": "return scores.sort((a, b) => a - b).slice(-3);"
+        }
+      ]
+    },
+    {
+      "id": "ts-divide-by-zero",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        2
+      ],
+      "comments": [
+        {
+          "path": "src/percent.ts",
+          "line": 2,
+          "severity": "warning",
+          "category": "bug",
+          "message": "This line performs division by `total`. If `total` is 0, this will result in `NaN` or `Infinity`, leading to outputs like 'NaN%' or 'Infinity%'. It's generally better to handle this edge case explicitly, perhaps by returning '0.0%' or throwing an error, depending on the desired behavior.",
+          "suggested_fix": "if (total === 0) { return \"0.0%\"; } return ((done / total) * 100).toFixed(1) + \"%\";"
+        }
+      ]
+    },
+    {
+      "id": "ts-two-bugs-transfer",
+      "bugs": 2,
+      "found": 2,
+      "reported": 5,
+      "truePositives": 4,
+      "falsePositives": 1,
+      "seededBugLines": [
+        6,
+        9
+      ],
+      "comments": [
+        {
+          "path": "src/transfer.ts",
+          "line": 6,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The `db.debit` operation is called without `await`. If `db.debit` is an asynchronous operation (which is highly likely for a database interaction), this could lead to a race condition where the debit might not complete before the credit is attempted, or before the function returns, leading to inconsistent state or unhandled errors. Both `debit` and `credit` operations should be part of a single, atomic database transaction to ensure data integrity.",
+          "suggested_fix": "await db.debit(from, amount);"
+        },
+        {
+          "path": "src/transfer.ts",
+          "line": 6,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The debit and credit operations are not atomic. If `db.debit` succeeds but `db.credit` fails (e.g., due to network issues, invalid 'to' account, or a database error), the 'from' account will be debited, but the 'to' account will not be credited, resulting in lost funds. Financial transactions must be atomic, typically achieved using database transactions (e.g., `db.transaction(async () => { await db.debit(...); await db.credit(...); })`).",
+          "suggested_fix": "/* Implement a database transaction here to ensure atomicity. Example: await db.transaction(async (tx) => { await tx.debit(from, amount); await tx.credit(to, amount); }); */"
+        },
+        {
+          "path": "src/transfer.ts",
+          "line": 9,
+          "severity": "critical",
+          "category": "security",
+          "message": "Logging `process.env.API_TOKEN` is a severe security vulnerability. API tokens are sensitive credentials and should never be logged, especially in plain text, as this could lead to their exposure in logs, making them accessible to unauthorized parties.",
+          "suggested_fix": "console.log(\"Transferred \" + amount + \" between accounts.\");"
+        },
+        {
+          "path": "src/transfer.ts",
+          "line": 5,
+          "severity": "warning",
+          "category": "bug",
+          "message": "The condition `balance > amount` means that if the balance is exactly equal to the amount, the transfer will not proceed. Most transfer systems allow transferring the exact available balance. Also, there's no check for `amount > 0`, which could lead to unexpected behavior if a negative or zero amount is passed.",
+          "suggested_fix": "if (amount > 0 && balance >= amount) {"
+        },
+        {
+          "path": "src/transfer.ts",
+          "line": 3,
+          "severity": "warning",
+          "category": "maintainability",
+          "message": "The function lacks comprehensive error handling. If `db.getBalance`, `db.debit`, or `db.credit` throws an error, the function will crash or leave the system in an inconsistent state without proper logging or recovery mechanisms. A `try-catch` block should be used to handle potential errors during database operations.",
+          "suggested_fix": "export async function transfer(from: string, to: string, amount: number) { try { /* ... existing logic ... */ } catch (error) { console.error(`Transfer failed: ${error.message}`); throw error; } }"
+        }
+      ]
+    },
+    {
+      "id": "py-mutable-default",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        1
+      ],
+      "comments": [
+        {
+          "path": "app/tags.py",
+          "line": 1,
+          "severity": "warning",
+          "category": "bug",
+          "message": "The default argument `tags=[]` is a mutable object. This can lead to unexpected behavior where the same list is reused across multiple calls to `add_tag` if `tags` is not explicitly provided, causing tags to accumulate. To fix this, use `None` as the default and initialize `tags` to `[]` inside the function if it's `None`.",
+          "suggested_fix": "def add_tag(tag, tags=None):"
+        }
+      ]
+    },
+    {
+      "id": "py-bare-except",
+      "bugs": 1,
+      "found": 1,
+      "reported": 2,
+      "truePositives": 2,
+      "falsePositives": 0,
+      "seededBugLines": [
+        5
+      ],
+      "comments": [
+        {
+          "path": "app/config.py",
+          "line": 5,
+          "severity": "critical",
+          "category": "bug",
+          "message": "The bare `except` block catches all exceptions, including system-level ones, and the `pass` statement causes the function to silently fail and return `None` if any error occurs during file reading. This makes it impossible for the caller to know if the configuration was loaded successfully or if an error occurred, leading to potential `None` dereference errors later in the application. It's best practice to catch specific exceptions and handle them appropriately, e.g., by logging the error or re-raising a more specific exception.",
+          "suggested_fix": "    except FileNotFoundError:\n        # Log the error or raise a custom exception\n        print(f\"Error: Config file not found at {path}\")\n        return None # Or raise an exception\n    except IOError as e:\n        print(f\"Error reading config file {path}: {e}\")\n        return None"
+        },
+        {
+          "path": "app/config.py",
+          "line": 4,
+          "severity": "suggestion",
+          "category": "maintainability",
+          "message": "The function `load_config` currently reads the file content as a raw string. If the configuration is expected to be in a structured format (e.g., JSON, YAML), this function is incomplete and will return an unparsed string. The caller would then have to parse it, which might not be the intent of a `load_config` function. Consider adding parsing logic if the config is structured, or rename the function to clarify it only reads raw file content.",
+          "suggested_fix": "            return json.loads(f.read()) # Example for JSON config"
+        }
+      ]
+    },
+    {
+      "id": "py-sql-fstring",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        2
+      ],
+      "comments": [
+        {
+          "path": "app/users.py",
+          "line": 2,
+          "severity": "critical",
+          "category": "security",
+          "message": "This line is vulnerable to SQL injection. Directly embedding user-provided input (`name`) into an SQL query string allows attackers to manipulate the query. For example, if `name` is `' OR '1'='1`, it could bypass authentication or extract sensitive data.",
+          "suggested_fix": "Always use parameterized queries to prevent SQL injection. The database driver will handle proper escaping. For example, `cursor.execute('SELECT * FROM users WHERE name = %s', (name,))` for psycopg2 or similar for other drivers."
+        }
+      ]
+    },
+    {
+      "id": "py-is-literal",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        2
+      ],
+      "comments": [
+        {
+          "path": "app/roles.py",
+          "line": 2,
+          "severity": "warning",
+          "category": "bug",
+          "message": "In Python, `is` checks for object identity, while `==` checks for value equality. For string comparisons, `==` should be used. Using `is` can lead to unexpected behavior as string interning is an implementation detail and not guaranteed.",
+          "suggested_fix": "    if role == \"admin\":"
+        }
+      ]
+    },
+    {
+      "id": "py-unsafe-yaml",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "app/settings.py",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "message": "Using `yaml.load()` is unsafe when parsing untrusted input, as it can lead to arbitrary code execution. It is highly recommended to use `yaml.safe_load()` instead to mitigate this security vulnerability.",
+          "suggested_fix": "    return yaml.safe_load(text)"
+        }
+      ]
+    },
+    {
+      "id": "py-pickle-loads",
+      "bugs": 1,
+      "found": 1,
+      "reported": 1,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "seededBugLines": [
+        4
+      ],
+      "comments": [
+        {
+          "path": "app/state.py",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "message": "Using `pickle.loads` with data from an untrusted source is a critical security vulnerability. Maliciously crafted pickle data can execute arbitrary code on the system. If the `blob` input can originate from an external or untrusted source, this function introduces a severe risk.",
+          "suggested_fix": "Avoid using `pickle` for data that might come from untrusted sources. Consider safer serialization formats like JSON, or if `pickle` is absolutely necessary, ensure the input `blob` is strictly authenticated and validated, or use a more secure alternative like `dill` with restricted unpickling if available and appropriate for your use case."
+        }
+      ]
+    },
+    {
+      "id": "clean-parameterized-query",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "comments": []
+    },
+    {
+      "id": "clean-safe-path",
+      "bugs": 0,
+      "found": 0,
+      "reported": 1,
+      "truePositives": 0,
+      "falsePositives": 1,
+      "seededBugLines": [],
+      "comments": [
+        {
+          "path": "src/uploads.ts",
+          "line": 11,
+          "severity": "warning",
+          "category": "bug",
+          "message": "The `readFile` function is hardcoded to use 'utf8' encoding. If the uploaded files are binary (e.g., images, PDFs), reading them with 'utf8' encoding will corrupt the data. The function should either return a Buffer (by omitting the encoding) or dynamically determine the appropriate encoding/content type if serving text files is the only intent.",
+          "suggested_fix": "return readFile(full);"
+        }
+      ]
+    },
+    {
+      "id": "clean-math-helpers",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "comments": []
+    },
+    {
+      "id": "clean-retry",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "comments": []
+    },
+    {
+      "id": "clean-debounce",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "comments": []
+    },
+    {
+      "id": "clean-type-guard",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "comments": []
+    },
+    {
+      "id": "clean-py-dataclass",
+      "bugs": 0,
+      "found": 0,
+      "reported": 2,
+      "truePositives": 0,
+      "falsePositives": 2,
+      "seededBugLines": [],
+      "comments": [
+        {
+          "path": "app/cart.py",
+          "line": 12,
+          "severity": "critical",
+          "category": "bug",
+          "message": "This line will raise a `KeyError` if any item in `self.items` does not have 'price' or 'qty' keys. This makes the `total` calculation fragile to malformed input. Using dictionary's `get` method with a default value can prevent crashes, though robust validation in the `add` method is generally preferred to prevent bad data from entering the cart.",
+          "suggested_fix": "return sum(i.get(\"price\", 0) * i.get(\"qty\", 0) for i in self.items)"
+        },
+        {
+          "path": "app/cart.py",
+          "line": 9,
+          "severity": "warning",
+          "category": "maintainability",
+          "message": "The `add` method currently allows any object to be appended to `self.items`. Without validation, this can lead to runtime errors in the `total` method if the added `item` does not conform to the expected structure (e.g., missing 'price' or 'qty' keys). Consider adding type hints or runtime validation for `item` to ensure data integrity."
+        }
+      ]
+    },
+    {
+      "id": "clean-py-safe-sql",
+      "bugs": 0,
+      "found": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "seededBugLines": [],
+      "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://",
+      "comments": []
+    }
+  ]
+}

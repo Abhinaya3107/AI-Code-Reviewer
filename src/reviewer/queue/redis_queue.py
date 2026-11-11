@@ -27,6 +27,21 @@ from redis.asyncio import Redis
 
 log = logging.getLogger(__name__)
 
+# How long a worker waits for a job in one blocking command. One command per wait keeps idle cost very low.
+POLL_TIMEOUT_S = 30
+
+
+def create_redis(url: str) -> Redis:
+    """The Redis client used everywhere, configured for blocking pops.
+
+    redis-py 8 applies a short default read timeout (about 5 seconds), which silently kills any blocking wait
+    longer than that: the worker would fail every few seconds instead of waiting for a job. The socket timeout
+    must be longer than the longest blocking wait.
+    """
+    return Redis.from_url(
+        url, decode_responses=True, socket_timeout=POLL_TIMEOUT_S + 15, socket_connect_timeout=10
+    )
+
 
 def _text(value: object) -> str:
     """The client is created with decode_responses=True, so values are text; this keeps the type checker honest."""

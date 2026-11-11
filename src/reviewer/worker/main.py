@@ -6,14 +6,12 @@ import signal
 import sys
 from functools import partial
 
-from redis.asyncio import Redis
-
 from reviewer.config import Settings, get_settings
 from reviewer.db.session import create_engine, create_session_factory
 from reviewer.github.client import GitHubApp
 from reviewer.llm import create_llm
 from reviewer.logging_setup import setup_logging
-from reviewer.queue.redis_queue import JobQueue
+from reviewer.queue.redis_queue import JobQueue, create_redis
 from reviewer.worker.handler import WorkerDeps, process_job
 from reviewer.worker.runner import run_worker
 
@@ -32,7 +30,7 @@ def install_signal_handlers(stop: asyncio.Event) -> None:
 
 async def run(settings: Settings, stop: asyncio.Event) -> None:
     """Builds everything the worker needs and runs it until `stop` is set. Shared with `reviewer.serve`."""
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = create_redis(settings.redis_url)
     queue = JobQueue(redis)
     github = GitHubApp(settings.github_app_id, settings.github_private_key)
     llm = create_llm(settings.llm_provider, settings.llm_api_key, settings.llm_model)

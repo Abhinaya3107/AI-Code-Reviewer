@@ -1,4 +1,14 @@
+# Local development. `docker compose up` runs the app with a local Redis and Postgres.
+# Real secrets stay in .env (never committed); compose passes them in and overrides only the service URLs.
 services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/reviewer
+    ports: ["3001:3001"]
+    depends_on: [redis, postgres]
   redis:
     image: redis:7
     ports: ["6379:6379"]

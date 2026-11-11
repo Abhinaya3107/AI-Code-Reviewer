@@ -1,0 +1,59 @@
+[project]
+name = "ai-code-reviewer"
+version = "0.1.0"
+description = "A GitHub App that reviews pull requests with an LLM and posts inline comments."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "httpx>=0.27",
+  "pyjwt[crypto]>=2.9",
+  "redis>=5.0",
+  "sqlalchemy[asyncio]>=2.0",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "respx>=0.21",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-PyYAML",
+  "aiosqlite>=0.22.1",
+  "fakeredis>=2.40.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reviewer"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests", "evals"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["E501"]  # line length is the formatter's job (and the LLM prompt has long lines on purpose)
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src:."
+packages = ["reviewer", "evals"]
+plugins = ["pydantic.mypy"]

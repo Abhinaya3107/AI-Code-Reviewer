@@ -4,6 +4,14 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def to_sqlalchemy_url(url: str) -> str:
+    """Points a plain Postgres URL (as hosts like Neon give it) at the psycopg 3 driver SQLAlchemy should use."""
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
 class Settings(BaseSettings):
     """Environment configuration. Read from the process environment, and from .env during development."""
 
@@ -38,14 +46,7 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str | None:
-        """The same Postgres URL, pointed at the psycopg 3 driver that SQLAlchemy should use."""
-        if not self.database_url:
-            return None
-        url = self.database_url
-        for prefix in ("postgresql://", "postgres://"):
-            if url.startswith(prefix):
-                return "postgresql+psycopg://" + url[len(prefix) :]
-        return url
+        return to_sqlalchemy_url(self.database_url) if self.database_url else None
 
 
 @lru_cache

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, type-check and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies (exactly as locked)
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check src tests alembic evals
+      - name: Formatting
+        run: uv run ruff format --check src tests alembic evals
+      - name: Type-check (strict)
+        run: uv run mypy
+      - name: Tests
+        run: uv run pytest -q
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build --tag ai-code-reviewer:ci .
+      - name: The image starts and answers its health check
+        run: |
+          docker run -d --name app -p 3001:3001 \
+            -e GITHUB_APP_ID=1 -e GITHUB_PRIVATE_KEY=dummy -e GITHUB_WEBHOOK_SECRET=dummy \
+            -e REDIS_URL=redis://127.0.0.1:6379 \
+            ai-code-reviewer:ci python -m reviewer.serve
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3001/health && exit 0
+            sleep 1
+          done
+          docker logs app
+          exit 1

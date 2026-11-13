@@ -162,6 +162,20 @@ class TestWebhookEndpoint:
     async def test_health(self, client: httpx.AsyncClient) -> None:
         assert (await client.get("/health")).json() == {"ok": True}
 
+    async def test_homepage_shows_the_project_status_and_links(self, client: httpx.AsyncClient) -> None:
+        response = await client.get("/")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        for expected in (
+            "AI Code Reviewer",
+            "API status: Online",
+            'href="/docs"',
+            "https://github.com/Abhinaya3107/AI-Code-Reviewer",
+        ):
+            assert expected in response.text
+        assert (await client.get("/docs")).status_code == 200
+        assert "/" not in (await client.get("/openapi.json")).json()["paths"]  # kept out of the API docs
+
     async def test_rejects_missing_and_wrong_signatures_with_401_and_queues_nothing(
         self, client: httpx.AsyncClient, queue: JobQueue
     ) -> None:

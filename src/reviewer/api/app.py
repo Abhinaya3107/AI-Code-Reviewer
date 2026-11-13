@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from redis.asyncio import Redis
 
 from reviewer.api.events import to_review_job
+from reviewer.api.homepage import HOMEPAGE_HTML
 from reviewer.api.security import verify_signature
 from reviewer.config import Settings, get_settings
 from reviewer.logging_setup import setup_logging
@@ -37,6 +38,10 @@ def create_app(settings: Settings | None = None, queue: JobQueue | None = None) 
     app = FastAPI(title="AI Code Reviewer", description="GitHub webhook receiver", lifespan=lifespan)
     app.state.settings = settings or get_settings()
     app.state.queue = queue
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def homepage() -> str:
+        return HOMEPAGE_HTML
 
     @app.get("/health")
     async def health() -> dict[str, bool]:
